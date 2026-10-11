@@ -1,0 +1,16 @@
+[workspace]
+resolver = "2"
+members = ["vf-core", "vf-cli", "chime-vst", "xtask"]
+
+[profile.release]
+lto = "thin"
+strip = "symbols"
+
+# wasmtime's debug-only call type checks allocate, which trips nih-plug's
+# assert_process_allocs; release builds never run them.
+[profile.dev.package.wasmtime]
+debug-assertions = false
+
+# Cranelift is very slow unoptimized; every plugin instance compiles the model.
+[profile.dev.package."*"]
+opt-level = 3

@@ -1,0 +1,13 @@
+[alias]
+xtask = "run --package xtask --release --"
+
+# Windows cross-compilation from Linux via the project-local llvm-mingw
+# toolchain (tools/llvm-mingw). Native Windows builds don't use this.
+[target.x86_64-pc-windows-gnullvm]
+linker = "tools/llvm-mingw/bin/x86_64-w64-mingw32-clang"
+# Link libunwind statically; it isn't present on stock Windows installs.
+rustflags = ["-C", "target-feature=+crt-static"]
+
+[env]
+CC_x86_64_pc_windows_gnullvm = { value = "tools/llvm-mingw/bin/x86_64-w64-mingw32-clang", relative = true }
+AR_x86_64_pc_windows_gnullvm = { value = "tools/llvm-mingw/bin/llvm-ar", relative = true }

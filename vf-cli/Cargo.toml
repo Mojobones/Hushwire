@@ -1,0 +1,10 @@
+[package]
+name = "vf-cli"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.104"
+hound = "3.5.1"
+vf-core = { version = "0.1.0", path = "../vf-core" }
+wasmtime = "49.0.2"

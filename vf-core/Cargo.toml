@@ -1,0 +1,10 @@
+[package]
+name = "vf-core"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.104"
+dirs = "7.0.0"
+ureq = "3.4.2"
+wasmtime = "49.0.2"

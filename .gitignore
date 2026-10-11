@@ -1,0 +1,14 @@
+# Build output
+/target/
+
+# Downloaded third-party binaries (clap-validator, llvm-mingw); see README
+/tools/
+
+# Browser latency harness: dependencies, generated bundle, test audio and results
+/latency-test/node_modules/
+/latency-test/results/
+/latency-test/public/bundle.js
+/latency-test/public/speech.wav
+
+# Never commit Amazon's model files
+*.wasm
