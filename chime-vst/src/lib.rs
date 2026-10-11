@@ -6,13 +6,16 @@
 //! thread. Until an engine is warm, the plugin passes the input through
 //! delayed by the reported latency, so latency never changes under the host.
 
+mod editor;
+
 use crossbeam_queue::ArrayQueue;
 use nih_plug::prelude::*;
+use nih_plug_egui::EguiState;
 use std::num::NonZeroU32;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use vf_core::{Model, QuantumAdapter, Variant, VoiceFocus};
 
 /// Fade time when the model output is switched in or out.
@@ -21,7 +24,7 @@ const FADE_SECONDS: f32 = 0.02;
 const MAX_DELAY_SECONDS: f32 = 0.25;
 
 #[derive(Enum, Debug, Clone, Copy, PartialEq, Eq)]
-enum ModelChoice {
+pub(crate) enum ModelChoice {
     #[name = "Light (c10)"]
     C10,
     #[name = "Standard (c20)"]
@@ -44,18 +47,21 @@ impl ModelChoice {
 }
 
 #[derive(Params)]
-struct VfParams {
+pub(crate) struct VfParams {
+    #[persist = "editor-state"]
+    editor_state: Arc<EguiState>,
     #[id = "bypass"]
-    bypass: BoolParam,
+    pub bypass: BoolParam,
     #[id = "mix"]
-    mix: FloatParam,
+    pub mix: FloatParam,
     #[id = "model"]
-    model: EnumParam<ModelChoice>,
+    pub model: EnumParam<ModelChoice>,
 }
 
 impl Default for VfParams {
     fn default() -> Self {
         Self {
+            editor_state: editor::default_state(),
             bypass: BoolParam::new("Bypass", false).make_bypass(),
             mix: FloatParam::new("Mix", 1.0, FloatRange::Linear { min: 0.0, max: 1.0 })
                 .with_smoother(SmoothingStyle::Linear(20.0))
@@ -80,8 +86,16 @@ struct LoadRequest {
     generation: u64,
 }
 
-/// State shared between the audio thread and the loader thread.
-struct Shared {
+/// What the loader is doing, for display in the editor.
+#[derive(Clone)]
+pub(crate) enum Status {
+    Loading(Variant),
+    Ready { variant: Variant, latency: usize, sample_rate: u32 },
+    Failed { variant: Variant, error: String },
+}
+
+/// State shared between the audio thread, the loader thread and the editor.
+pub(crate) struct Shared {
     requests: ArrayQueue<LoadRequest>,
     ready: ArrayQueue<Box<Engine>>,
     retired: ArrayQueue<Box<Engine>>,
@@ -92,11 +106,23 @@ struct Shared {
     /// up requests.
     finished: AtomicU64,
     shutdown: AtomicBool,
+    /// Written by the loader thread, read by the editor; never touched by the audio thread.
+    pub status: Mutex<Status>,
+    /// Set by the audio thread when model output is (mostly) faded in.
+    pub wet_active: AtomicBool,
 }
 
 impl Shared {
+    /// Updates the editor status, unless a newer load has been requested since.
+    fn set_status(&self, generation: u64, status: Status) {
+        if generation == self.generation.load(Ordering::Acquire) {
+            *self.status.lock().unwrap_or_else(|e| e.into_inner()) = status;
+        }
+    }
+
     fn load(&self, req: LoadRequest) {
         let LoadRequest { variant, sample_rate, generation } = req;
+        self.set_status(generation, Status::Loading(variant));
         let build = || -> anyhow::Result<Engine> {
             let model = Model::load(variant)?;
             let latency = vf_core::latency_samples(&model, sample_rate)?;
@@ -106,11 +132,15 @@ impl Shared {
         match build() {
             Ok(engine) if generation == self.generation.load(Ordering::Acquire) => {
                 nih_log!("Voice Focus {} ready at {sample_rate} Hz, latency {} samples", variant.name(), engine.latency);
+                self.set_status(generation, Status::Ready { variant, latency: engine.latency, sample_rate });
                 // Only fails if the audio thread hasn't picked up two earlier engines; drop it here then.
                 let _ = self.ready.push(Box::new(engine));
             }
             Ok(_) => {}
-            Err(err) => nih_error!("Failed to load Voice Focus {}: {err:#}", variant.name()),
+            Err(err) => {
+                nih_error!("Failed to load Voice Focus {}: {err:#}", variant.name());
+                self.set_status(generation, Status::Failed { variant, error: format!("{err:#}") });
+            }
         }
         self.finished.fetch_max(generation, Ordering::AcqRel);
     }
@@ -190,6 +220,8 @@ impl Default for ChimeVst {
             generation: AtomicU64::new(0),
             finished: AtomicU64::new(0),
             shutdown: AtomicBool::new(false),
+            status: Mutex::new(Status::Loading(Variant::C20)),
+            wet_active: AtomicBool::new(false),
         });
         Self {
             params: Arc::new(VfParams::default()),
@@ -271,6 +303,10 @@ impl Plugin for ChimeVst {
 
     fn params(&self) -> Arc<dyn Params> {
         self.params.clone()
+    }
+
+    fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
+        editor::create(self.params.clone(), self.shared.clone())
     }
 
     fn initialize(&mut self, layout: &AudioIOLayout, config: &BufferConfig, context: &mut impl InitContext<Self>) -> bool {
@@ -368,6 +404,7 @@ impl Plugin for ChimeVst {
             }
             self.dry_pos = (self.dry_pos + 1) % len;
         }
+        self.shared.wet_active.store(self.wet_gain > 0.5, Ordering::Relaxed);
         ProcessStatus::Normal
     }
 }

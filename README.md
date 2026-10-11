@@ -25,6 +25,14 @@ and the cleaned signal goes to both channels.
 | **Mix** | Dry/wet blend. Dry is latency-aligned and Voice Focus's inverted polarity is corrected, so partial mixes don't comb-filter. |
 | **Bypass** | Host bypass. Latency stays constant. |
 
+The plugin window shows these controls plus a status line: loading, active,
+bypassed, or an error such as a failed download. It also shows the current
+latency.
+
+**Standalone app:** to try the plugin with your microphone without a DAW,
+run `cargo run --release -p chime-vst`. Add `-- --help` to see the audio
+backend and device options.
+
 - **Latency:** about 55 ms at 48 kHz (2,651 samples), reported to the host so
   it's compensated during playback and mixdown. That's too much for live
   monitoring through the plugin. Latency is measured on load for the host's
@@ -68,7 +76,7 @@ toolchain should also work, but it hasn't been tested.
 | Path | |
 |---|---|
 | `vf-core/` | Model download/cache, the wasmtime engine, latency measurement |
-| `chime-vst/` | The nih-plug plugin |
+| `chime-vst/` | The nih-plug plugin (`editor.rs` is the egui GUI, `main.rs` the standalone app) |
 | `vf-cli/` | Offline test tool: `vf-cli fetch`, `vf-cli latency`, `vf-cli process in.wav out.wav [c10\|c20\|c50\|c100] [--bypass]` |
 | `latency-test/` | The original in-browser measurement harness (headless Chromium + Chime SDK) |
 | `tools/` | clap-validator binaries (Linux/Windows) and llvm-mingw |
