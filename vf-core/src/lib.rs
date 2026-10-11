@@ -1,7 +1,8 @@
 //! Runs Amazon Voice Focus noise suppression natively with wasmtime.
 //!
 //! The model WASM is fetched from Amazon's CDN (the same files the Chime SDK
-//! loads in the browser) and cached locally; it is never bundled. The call
+//! loads in the browser), only after the user accepts [`DOWNLOAD_NOTICE`], and
+//! cached locally; it is never bundled. The call
 //! sequence mirrors the SDK's `worklet-inline-processor-v1.js`.
 
 use anyhow::{bail, ensure, Context, Result};
@@ -46,19 +47,64 @@ impl Variant {
     }
 }
 
-/// Directory holding downloaded models: `<data dir>/ChimeVST/models`
-/// (`~/.local/share/...` on Linux, `%APPDATA%\...` on Windows).
-pub fn cache_dir() -> Result<PathBuf> {
-    let base = dirs::data_dir().context("no user data directory")?;
-    Ok(base.join("ChimeVST").join("models"))
+/// Shown to the user before the first download; they must accept it.
+pub const DOWNLOAD_NOTICE: &str = "The noise-suppression model is Amazon Voice Focus, which is Amazon's \
+proprietary software and is not included with this plugin. Downloading fetches it from Amazon's servers \
+(static.sdkassets.chime.aws) to this computer. Its use is subject to Amazon's terms. This project is not \
+affiliated with or endorsed by Amazon.";
+
+/// Per-user data directory: `~/.local/share/Hushwire` on Linux,
+/// `%APPDATA%\Hushwire` on Windows.
+fn data_dir() -> Result<PathBuf> {
+    Ok(dirs::data_dir().context("no user data directory")?.join("Hushwire"))
 }
 
+/// Directory holding downloaded models.
+pub fn cache_dir() -> Result<PathBuf> {
+    Ok(data_dir()?.join("models"))
+}
+
+fn consent_marker() -> Result<PathBuf> {
+    Ok(data_dir()?.join("accepted-download-notice"))
+}
+
+/// Whether the user has accepted [`DOWNLOAD_NOTICE`].
+pub fn download_accepted() -> bool {
+    consent_marker().is_ok_and(|p| p.exists())
+}
+
+/// Records that the user accepted [`DOWNLOAD_NOTICE`].
+pub fn accept_download() -> Result<()> {
+    let marker = consent_marker()?;
+    std::fs::create_dir_all(marker.parent().unwrap())?;
+    std::fs::write(&marker, format!("{DOWNLOAD_NOTICE}\n"))?;
+    Ok(())
+}
+
+/// Returned (inside the `anyhow::Error`) when a model needs downloading but
+/// the user hasn't accepted [`DOWNLOAD_NOTICE`] yet.
+#[derive(Debug)]
+pub struct DownloadNotAccepted;
+
+impl std::fmt::Display for DownloadNotAccepted {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("the model download notice hasn't been accepted yet")
+    }
+}
+
+impl std::error::Error for DownloadNotAccepted {}
+
 /// Returns the cached model path, downloading it from the CDN on first use.
+/// Fails with [`DownloadNotAccepted`] if a download is needed but the user
+/// hasn't accepted [`DOWNLOAD_NOTICE`].
 pub fn ensure_model(variant: Variant) -> Result<PathBuf> {
     let dir = cache_dir()?;
     let path = dir.join(variant.file_name());
     if path.exists() {
         return Ok(path);
+    }
+    if !download_accepted() {
+        return Err(DownloadNotAccepted.into());
     }
     std::fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
 

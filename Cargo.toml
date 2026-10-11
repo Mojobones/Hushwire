@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["vf-core", "vf-cli", "chime-vst", "xtask"]
+members = ["vf-core", "vf-cli", "hushwire", "xtask"]
 
 [profile.release]
 lto = "thin"

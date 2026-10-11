@@ -90,6 +90,8 @@ struct LoadRequest {
 #[derive(Clone)]
 pub(crate) enum Status {
     Loading(Variant),
+    /// The model needs downloading but the user hasn't accepted the download notice.
+    NeedsConsent(Variant),
     Ready { variant: Variant, latency: usize, sample_rate: u32 },
     Failed { variant: Variant, error: String },
 }
@@ -110,6 +112,8 @@ pub(crate) struct Shared {
     pub status: Mutex<Status>,
     /// Set by the audio thread when model output is (mostly) faded in.
     pub wet_active: AtomicBool,
+    /// Set by the editor to retry a failed load (e.g. after accepting the download notice).
+    pub retry: AtomicBool,
 }
 
 impl Shared {
@@ -137,6 +141,10 @@ impl Shared {
                 let _ = self.ready.push(Box::new(engine));
             }
             Ok(_) => {}
+            Err(err) if err.downcast_ref::<vf_core::DownloadNotAccepted>().is_some() => {
+                nih_log!("Voice Focus {} needs downloading; waiting for the user to accept the notice", variant.name());
+                self.set_status(generation, Status::NeedsConsent(variant));
+            }
             Err(err) => {
                 nih_error!("Failed to load Voice Focus {}: {err:#}", variant.name());
                 self.set_status(generation, Status::Failed { variant, error: format!("{err:#}") });
@@ -158,7 +166,7 @@ impl Loader {
     fn spawn(shared: Arc<Shared>) -> Loader {
         let worker = shared.clone();
         let thread = thread::Builder::new()
-            .name("chime-vst-loader".into())
+            .name("hushwire-loader".into())
             .spawn(move || {
                 while !worker.shutdown.load(Ordering::Acquire) {
                     while let Some(req) = worker.requests.pop() {
@@ -191,7 +199,7 @@ impl Drop for Loader {
     }
 }
 
-pub struct ChimeVst {
+pub struct Hushwire {
     params: Arc<VfParams>,
     shared: Arc<Shared>,
     loader: Loader,
@@ -211,7 +219,7 @@ pub struct ChimeVst {
     dry_pos: usize,
 }
 
-impl Default for ChimeVst {
+impl Default for Hushwire {
     fn default() -> Self {
         let shared = Arc::new(Shared {
             requests: ArrayQueue::new(2),
@@ -222,6 +230,7 @@ impl Default for ChimeVst {
             shutdown: AtomicBool::new(false),
             status: Mutex::new(Status::Loading(Variant::C20)),
             wet_active: AtomicBool::new(false),
+            retry: AtomicBool::new(false),
         });
         Self {
             params: Arc::new(VfParams::default()),
@@ -241,7 +250,7 @@ impl Default for ChimeVst {
     }
 }
 
-impl ChimeVst {
+impl Hushwire {
     fn new_request(&mut self, choice: ModelChoice) -> LoadRequest {
         self.loaded_choice = Some(choice);
         let generation = self.shared.generation.fetch_add(1, Ordering::AcqRel) + 1;
@@ -278,9 +287,9 @@ impl ChimeVst {
     }
 }
 
-impl Plugin for ChimeVst {
-    const NAME: &'static str = "Chime Voice Focus";
-    const VENDOR: &'static str = "ChimeVST";
+impl Plugin for Hushwire {
+    const NAME: &'static str = "Hushwire";
+    const VENDOR: &'static str = "Hushwire";
     const URL: &'static str = "";
     const EMAIL: &'static str = "";
     const VERSION: &'static str = env!("CARGO_PKG_VERSION");
@@ -354,7 +363,7 @@ impl Plugin for ChimeVst {
     fn process(&mut self, buffer: &mut Buffer, _aux: &mut AuxiliaryBuffers, context: &mut impl ProcessContext<Self>) -> ProcessStatus {
         let choice = self.params.model.value();
         let in_flight = self.shared.generation.load(Ordering::Acquire) != self.shared.finished.load(Ordering::Acquire);
-        if self.loaded_choice != Some(choice) && !in_flight {
+        if !in_flight && (self.loaded_choice != Some(choice) || self.shared.retry.swap(false, Ordering::AcqRel)) {
             let req = self.new_request(choice);
             // Can't fail: with one load in flight at most, the queue never holds more than one.
             let _ = self.shared.requests.push(req);
@@ -409,19 +418,19 @@ impl Plugin for ChimeVst {
     }
 }
 
-impl ClapPlugin for ChimeVst {
-    const CLAP_ID: &'static str = "dev.chimevst.voice-focus";
-    const CLAP_DESCRIPTION: Option<&'static str> = Some("Amazon Voice Focus noise suppression");
+impl ClapPlugin for Hushwire {
+    const CLAP_ID: &'static str = "dev.hushwire.denoise";
+    const CLAP_DESCRIPTION: Option<&'static str> = Some("Voice noise suppression using Amazon's Voice Focus model (unofficial)");
     const CLAP_MANUAL_URL: Option<&'static str> = None;
     const CLAP_SUPPORT_URL: Option<&'static str> = None;
     const CLAP_FEATURES: &'static [ClapFeature] =
         &[ClapFeature::AudioEffect, ClapFeature::Restoration, ClapFeature::Mono, ClapFeature::Stereo];
 }
 
-impl Vst3Plugin for ChimeVst {
-    const VST3_CLASS_ID: [u8; 16] = *b"ChimeVoiceFocus1";
+impl Vst3Plugin for Hushwire {
+    const VST3_CLASS_ID: [u8; 16] = *b"HushwireDenoise1";
     const VST3_SUBCATEGORIES: &'static [Vst3SubCategory] = &[Vst3SubCategory::Fx, Vst3SubCategory::Restoration];
 }
 
-nih_export_clap!(ChimeVst);
-nih_export_vst3!(ChimeVst);
+nih_export_clap!(Hushwire);
+nih_export_vst3!(Hushwire);

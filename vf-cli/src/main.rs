@@ -1,6 +1,6 @@
 //! Offline test tool for vf-core.
 //!
-//!   vf-cli fetch                                  download all model variants
+//!   vf-cli fetch [--accept-download-notice]       download all model variants
 //!   vf-cli latency                                plugin latency at common sample rates
 //!   vf-cli process <in.wav> <out.wav> [c10|c20|c50|c100] [--bypass]
 
@@ -12,6 +12,12 @@ fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("fetch") => {
+            if !vf_core::download_accepted() {
+                if !args.iter().any(|a| a == "--accept-download-notice") {
+                    bail!("{}\n\nRerun with --accept-download-notice to accept and download.", vf_core::DOWNLOAD_NOTICE);
+                }
+                vf_core::accept_download()?;
+            }
             for v in Variant::ALL {
                 println!("{} -> {}", v.name(), vf_core::ensure_model(v)?.display());
             }
@@ -29,7 +35,7 @@ fn main() -> Result<()> {
             let variant = variant.context("unknown variant")?;
             process(&args[1], &args[2], variant, args.iter().any(|a| a == "--bypass"))
         }
-        _ => bail!("usage: vf-cli fetch | vf-cli latency | vf-cli process <in.wav> <out.wav> [c10|c20|c50|c100] [--bypass]"),
+        _ => bail!("usage: vf-cli fetch [--accept-download-notice] | vf-cli latency | vf-cli process <in.wav> <out.wav> [c10|c20|c50|c100] [--bypass]"),
     }
 }
 

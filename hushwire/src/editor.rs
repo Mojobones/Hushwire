@@ -8,8 +8,8 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-const WIDTH: u32 = 380;
-const HEIGHT: u32 = 230;
+const WIDTH: u32 = 420;
+const HEIGHT: u32 = 300;
 
 pub(crate) fn default_state() -> Arc<EguiState> {
     EguiState::from_size(WIDTH, HEIGHT)
@@ -25,7 +25,12 @@ pub(crate) fn create(params: Arc<VfParams>, shared: Arc<Shared>) -> Option<Box<d
             // Status changes come from other threads, so poll a few times a second.
             ctx.request_repaint_after(Duration::from_millis(250));
             egui::CentralPanel::default().show(ctx, |ui| {
-                ui.heading("Chime Voice Focus");
+                ui.heading("Hushwire");
+                ui.label(
+                    RichText::new("Unofficial host for Amazon's Voice Focus model. Not affiliated with Amazon.")
+                        .small()
+                        .weak(),
+                );
                 ui.add_space(8.0);
 
                 egui::Grid::new("controls").num_columns(2).spacing([16.0, 10.0]).show(ui, |ui| {
@@ -50,7 +55,7 @@ pub(crate) fn create(params: Arc<VfParams>, shared: Arc<Shared>) -> Option<Box<d
                 ui.add_space(6.0);
                 ui.separator();
                 let status = shared.status.lock().unwrap_or_else(|e| e.into_inner()).clone();
-                status_line(ui, &status, params.bypass.value(), shared.wet_active.load(Ordering::Relaxed));
+                status_line(ui, &shared, &status, params.bypass.value());
 
                 ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
                     ui.label(RichText::new(format!("Models: {cache_dir}")).small().weak());
@@ -77,7 +82,7 @@ fn model_combo(ui: &mut egui::Ui, params: &VfParams, setter: &ParamSetter) {
         });
 }
 
-fn status_line(ui: &mut egui::Ui, status: &Status, bypass: bool, wet_active: bool) {
+fn status_line(ui: &mut egui::Ui, shared: &Shared, status: &Status, bypass: bool) {
     const GREEN: Color32 = Color32::from_rgb(110, 200, 120);
     const AMBER: Color32 = Color32::from_rgb(230, 180, 80);
     const RED: Color32 = Color32::from_rgb(230, 100, 100);
@@ -87,14 +92,30 @@ fn status_line(ui: &mut egui::Ui, status: &Status, bypass: bool, wet_active: boo
             ui.colored_label(AMBER, format!("Loading {}…", variant.name()));
             ui.label(RichText::new("The first use of each model downloads it from Amazon's CDN.").small());
         }
+        Status::NeedsConsent(variant) => {
+            ui.colored_label(AMBER, format!("Model {} needs to be downloaded. Audio passes through unprocessed.", variant.name()));
+            ui.label(RichText::new(vf_core::DOWNLOAD_NOTICE).small());
+            if ui.button("Accept and download").clicked() {
+                match vf_core::accept_download() {
+                    Ok(()) => shared.retry.store(true, Ordering::Release),
+                    Err(err) => {
+                        *shared.status.lock().unwrap_or_else(|e| e.into_inner()) =
+                            Status::Failed { variant: *variant, error: format!("saving acceptance: {err:#}") };
+                    }
+                }
+            }
+        }
         Status::Failed { variant, error } => {
             ui.colored_label(RED, format!("Couldn't load {}. Audio passes through unprocessed.", variant.name()));
             ui.label(RichText::new(error).small());
+            if ui.button("Retry").clicked() {
+                shared.retry.store(true, Ordering::Release);
+            }
         }
         Status::Ready { variant, latency, sample_rate } => {
             if bypass {
                 ui.label(RichText::new("Bypassed").weak());
-            } else if wet_active {
+            } else if shared.wet_active.load(Ordering::Relaxed) {
                 ui.colored_label(GREEN, format!("Active: {}", variant.name()));
             } else {
                 ui.colored_label(AMBER, format!("Starting {}…", variant.name()));

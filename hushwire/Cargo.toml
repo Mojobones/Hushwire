@@ -1,5 +1,5 @@
 [package]
-name = "chime-vst"
+name = "hushwire"
 version = "0.1.0"
 edition = "2024"
 
@@ -15,7 +15,7 @@ anyhow = "1"
 # Compile out trace/debug logging everywhere: Cranelift logs every instruction it emits.
 log = { version = "0.4", features = ["max_level_info", "release_max_level_info"] }
 
-# Standalone app (same editor, own audio I/O): `cargo run --release -p chime-vst`
+# Standalone app (same editor, own audio I/O): `cargo run --release -p hushwire`
 [[bin]]
-name = "chime-vst"
+name = "hushwire"
 path = "src/main.rs"

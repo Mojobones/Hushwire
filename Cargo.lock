@@ -499,18 +499,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f079e83a288787bcd14a6aea84cee5c87a67c5a3e660c30f557a3d24761b3527"
 
 [[package]]
-name = "chime-vst"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "crossbeam-queue",
- "log",
- "nih_plug",
- "nih_plug_egui",
- "vf-core",
-]
-
-[[package]]
 name = "clang-sys"
 version = "1.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1567,6 +1555,18 @@ name = "httparse"
 version = "1.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6dbf3de79e51f3d586ab4cb9d5c3e2c14aa28ed23d180cf89b4df0454a69cc87"
+
+[[package]]
+name = "hushwire"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "crossbeam-queue",
+ "log",
+ "nih_plug",
+ "nih_plug_egui",
+ "vf-core",
+]
 
 [[package]]
 name = "id-arena"
